@@ -1,15 +1,14 @@
 """Two integration paths (PLAN decides which is primary in Phase 0).
 
 - **Path A — native subtitle track (editable).** Import the ``.ass`` onto a
-  Kdenlive subtitle track via the fork's D-Bus interface. Only viable if Phase 0
-  confirms Kdenlive renders ``\\k``/``\\kf`` and doesn't strip tags on import.
-- **Path B — burn-in via MLT/libass (guaranteed).** Apply the ASS as a filter in
-  the render chain; libass honours karaoke timing reliably. Not editable after.
-
-Recommended: support both — A for editing, B as the dependable final render.
+  Kdenlive subtitle track via the fork's D-Bus interface. Needs the running
+  Linux fork — Phase 3.
+- **Path B — burn-in via ffmpeg/libass (guaranteed).** Implemented and works on
+  Windows now; libass honours ``\\k``/``\\kf`` karaoke timing reliably.
 """
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 
@@ -26,11 +25,27 @@ def burn_in(
     video_in: str | Path,
     ass_path: str | Path,
     video_out: str | Path,
-) -> None:
-    """Path B: burn subtitles in via MLT/ffmpeg libass.
+    *,
+    crf: int = 18,
+    preset: str = "medium",
+) -> Path:
+    """Path B: burn an ASS subtitle (with karaoke) into a video via ffmpeg/libass.
 
-    TODO(phase-3): drive the MLT ``avfilter.subtitles`` / ffmpeg ``ass`` filter
-    using the MLT version bundled with the pinned Kdenlive (confirm exact filter
-    name + params in Phase 0).
+    The ``subtitles`` filter is fussy about Windows paths (drive colons), so we
+    run ffmpeg with the working directory set to the ASS file's folder and pass
+    only its filename to the filter.
     """
-    raise NotImplementedError("Phase 3: MLT/libass burn-in (Path B)")
+    ass_path = Path(ass_path).resolve()
+    video_in = Path(video_in).resolve()
+    video_out = Path(video_out).resolve()
+
+    cmd = [
+        "ffmpeg", "-y",
+        "-i", str(video_in),
+        "-vf", f"subtitles={ass_path.name}",
+        "-c:a", "copy",
+        "-c:v", "libx264", "-crf", str(crf), "-preset", preset,
+        str(video_out),
+    ]
+    subprocess.run(cmd, cwd=str(ass_path.parent), check=True)
+    return video_out

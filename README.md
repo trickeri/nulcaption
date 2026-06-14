@@ -46,20 +46,40 @@ Default styling is the Nuldrums brand (obsidian/amethyst, highlight = amethyst).
 
 ## Platforms
 
-Targets **Windows and Linux (Arch / RTX 4090)**. The ASS generator and style
-presets are pure Python and run anywhere; transcription needs ffmpeg + a Whisper
-backend, and native-track / burn-in integration is exercised against the Linux
-Kdenlive fork + MLT.
+Runs on **Windows and Linux (Arch / RTX 4090)**. The captioning pipeline
+(transcribe → ASS karaoke → burn-in) works standalone today; the native
+Kdenlive subtitle-track path (Path A) needs the Linux fork and is Phase 3.
 
-## Quick start (dev)
+## Backend: whisper.cpp + Vulkan + large-v3
+
+Transcription uses **whisper.cpp built with the Vulkan GGML backend** and the
+**large-v3** model. Neither the binary nor the ~3 GB model lives in this repo —
+a one-time setup step provisions them into a cache dir
+(`%LOCALAPPDATA%\nulcaption` on Windows, override with `NULCAPTION_HOME`):
 
 ```bash
-python -m venv .venv && . .venv/bin/activate   # Windows: .venv\Scripts\activate
-pip install -e ".[dev]"
-pytest
+nulcaption-setup            # builds whisper.cpp (Vulkan) + downloads large-v3
 ```
 
-Generated `.ass` files should be validated in a known-good libass player (mpv)
+Requirements for the build: CMake, a C++ toolchain (MSVC/clang/gcc), the
+**Vulkan SDK** (headers + `glslc`), `git`, and `ffmpeg` on PATH. Official
+whisper.cpp releases ship no Vulkan binary, so setup builds it from the pinned
+tag. Re-run anytime; it's idempotent (`--force-build` / `--force-model` to redo).
+
+## Quick start
+
+```bash
+pip install -e ".[dev]"     # or just run modules with PYTHONPATH=src
+nulcaption-setup            # provision the Vulkan backend + model (first run only)
+
+# transcribe + generate an editable karaoke .ass next to the clip:
+nulcaption caption clip.mp4
+
+# ...or burn the karaoke straight into a video (ffmpeg/libass, Path B):
+nulcaption caption clip.mp4 --burn -o clip.karaoke.mp4 --style nuldrums
+```
+
+Generated `.ass` files can also be validated in a known-good libass player (mpv)
 before touching Kdenlive (PLAN Phase 2 acceptance).
 
 ## License

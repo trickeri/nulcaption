@@ -7,16 +7,19 @@ name = "nulcaption"
 version = "0.0.1"
 description = "Local word-by-word karaoke captioning for Kdenlive (Whisper -> styled ASS)."
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "trickeri" }]
-keywords = ["kdenlive", "subtitles", "ass", "karaoke", "whisper", "asr", "mcp"]
+keywords = ["kdenlive", "subtitles", "ass", "karaoke", "whisper", "vulkan", "asr", "mcp"]
 
-# Core (ASS generation + styles) is dependency-free and cross-platform.
+# Core (ASS gen, styles, whisper.cpp driver, ffmpeg burn-in) is dependency-free
+# and cross-platform: the heavy lifting is the whisper.cpp Vulkan binary + ffmpeg,
+# provisioned out-of-band by `nulcaption-setup` (not pip deps).
 dependencies = []
 
 [project.optional-dependencies]
-# Word-level transcription backends (pick one in Phase 0/1).
+# Alternative transcription backends (the default is whisper.cpp Vulkan, which
+# needs no Python deps). These are Phase 1 forced-alignment alternatives.
 whisperx = ["whisperx>=3.1"]
 faster = ["faster-whisper>=1.0"]
 # Agent path: expose subtitle.* tools.
@@ -24,6 +27,8 @@ mcp = ["mcp>=1.0.0"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
 
 [project.scripts]
+nulcaption = "nulcaption.cli:main"
+nulcaption-setup = "nulcaption.setup:main"
 nulcaption-mcp = "nulcaption.mcp.tools:main"
 
 [tool.hatch.build.targets.wheel]
