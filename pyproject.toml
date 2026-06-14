@@ -1,0 +1,38 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nulcaption"
+version = "0.0.1"
+description = "Local word-by-word karaoke captioning for Kdenlive (Whisper -> styled ASS)."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "trickeri" }]
+keywords = ["kdenlive", "subtitles", "ass", "karaoke", "whisper", "asr", "mcp"]
+
+# Core (ASS generation + styles) is dependency-free and cross-platform.
+dependencies = []
+
+[project.optional-dependencies]
+# Word-level transcription backends (pick one in Phase 0/1).
+whisperx = ["whisperx>=3.1"]
+faster = ["faster-whisper>=1.0"]
+# Agent path: expose subtitle.* tools.
+mcp = ["mcp>=1.0.0"]
+dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
+
+[project.scripts]
+nulcaption-mcp = "nulcaption.mcp.tools:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nulcaption"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

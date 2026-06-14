@@ -1,0 +1,75 @@
+"""Style presets rendered into ASS ``[V4+ Styles]`` lines.
+
+ASS colours are ``&HAABBGGRR`` (alpha, blue, green, red; alpha 00 = opaque).
+In karaoke, un-swept text shows ``SecondaryColour`` and the sweep fills to
+``PrimaryColour`` — so for highlighting, Primary = highlight, Secondary = base.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+
+def ass_colour(rgb: str, alpha: int = 0) -> str:
+    """``"6E2C8B"`` (RRGGBB) -> ``"&H006E2C8B"``-style ``&HAABBGGRR``."""
+    rgb = rgb.lstrip("#")
+    if len(rgb) != 6:
+        raise ValueError(f"expected RRGGBB hex, got {rgb!r}")
+    rr, gg, bb = rgb[0:2], rgb[2:4], rgb[4:6]
+    return f"&H{alpha:02X}{bb}{gg}{rr}".upper()
+
+
+@dataclass(frozen=True, slots=True)
+class Style:
+    name: str
+    fontname: str
+    fontsize: int
+    # highlight (swept/active) and base (un-swept) colours, RRGGBB
+    highlight_rgb: str
+    base_rgb: str
+    outline_rgb: str = "000000"
+    back_rgb: str = "000000"
+    bold: int = -1          # ASS: -1 true, 0 false
+    outline: float = 3.0
+    shadow: float = 1.0
+    alignment: int = 2      # numpad: 2 = bottom-center
+    margin_v: int = 60
+
+    def to_ass_style_line(self) -> str:
+        return (
+            f"Style: {self.name},{self.fontname},{self.fontsize},"
+            f"{ass_colour(self.highlight_rgb)},{ass_colour(self.base_rgb)},"
+            f"{ass_colour(self.outline_rgb)},{ass_colour(self.back_rgb, 0)},"
+            f"{self.bold},0,0,0,100,100,0,0,1,{self.outline},{self.shadow},"
+            f"{self.alignment},40,40,{self.margin_v},1"
+        )
+
+    @staticmethod
+    def format_line() -> str:
+        return (
+            "Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, "
+            "OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, "
+            "ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, "
+            "Alignment, MarginL, MarginR, MarginV, Encoding"
+        )
+
+
+# Nuldrums brand: amethyst highlight on near-white base, obsidian outline.
+NULDRUMS = Style(
+    name="Nuldrums",
+    fontname="IBM Plex Sans",
+    fontsize=72,
+    highlight_rgb="B57EDC",   # amethyst
+    base_rgb="F2F2F2",
+    outline_rgb="0B0B10",     # obsidian
+)
+
+PLAIN = Style(
+    name="Plain",
+    fontname="Arial",
+    fontsize=64,
+    highlight_rgb="FFD400",   # yellow sweep
+    base_rgb="FFFFFF",
+    outline_rgb="000000",
+)
+
+PRESETS: dict[str, Style] = {"nuldrums": NULDRUMS, "plain": PLAIN}
