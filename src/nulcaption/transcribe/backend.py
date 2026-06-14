@@ -1,30 +1,25 @@
 """Transcription frontend: ffmpeg audio extract -> whisper.cpp (Vulkan) words.
 
-The default (and only fully-wired) backend is **whisper.cpp with the Vulkan
-GGML backend**, driven via the ``whisper-cli`` binary provisioned by
-:mod:`nulcaption.setup`. Word-level timestamps come from ``--max-len 1
---split-on-word`` so each emitted segment is a single word with start/end
-offsets — the form the ASS karaoke generator needs.
+NulCaption supports **one** ASR backend on purpose: **whisper.cpp with the
+Vulkan GGML backend**. Vulkan is the portable choice — it runs on NVIDIA, AMD,
+and Intel GPUs, so anyone using the plugin gets GPU acceleration without a
+vendor-specific (e.g. CUDA) toolchain. The binary is provisioned by
+:mod:`nulcaption.setup` and driven via ``whisper-cli``.
 
-Output is normalised to :class:`nulcaption.ass.Word` so the generator never sees
-backend-specific shapes.
+Word-level timestamps come from ``--max-len 1 --split-on-word`` so each emitted
+segment is a single word with start/end offsets — the form the ASS karaoke
+generator needs. Output is normalised to :class:`nulcaption.ass.Word` so the
+generator never sees backend-specific shapes.
 """
 from __future__ import annotations
 
 import json
 import subprocess
 import tempfile
-from enum import Enum
 from pathlib import Path
 
 from .. import runtime as rt
 from ..ass import Word
-
-
-class TranscribeBackend(str, Enum):
-    WHISPER_CPP_VULKAN = "whisper-cpp-vulkan"  # default, fully implemented
-    WHISPERX = "whisperx"                      # alt (forced alignment) — Phase 1
-    FASTER_WHISPER = "faster-whisper"          # alt (CTranslate2) — Phase 1
 
 
 def extract_audio(src: str | Path, dst: str | Path) -> Path:
@@ -62,22 +57,15 @@ def _parse_whisper_json(data: dict) -> list[Word]:
 
 def transcribe(
     audio_path: str | Path,
-    backend: TranscribeBackend | str = TranscribeBackend.WHISPER_CPP_VULKAN,
     *,
     language: str = "auto",
     threads: int | None = None,
 ) -> list[Word]:
-    """Return normalised word timings for ``audio_path``.
+    """Return normalised word timings for ``audio_path`` (whisper.cpp Vulkan).
 
     ``audio_path`` may be any media ffmpeg can read; non-WAV inputs are extracted
     to mono 16 kHz first.
     """
-    backend = TranscribeBackend(backend)
-    if backend is not TranscribeBackend.WHISPER_CPP_VULKAN:
-        raise NotImplementedError(
-            f"{backend.value} is a Phase 1 alternative; use whisper-cpp-vulkan"
-        )
-
     rt.require_ready()
     src = Path(audio_path)
 

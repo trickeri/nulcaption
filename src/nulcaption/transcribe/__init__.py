@@ -1,5 +1,5 @@
-"""Audio -> word-level timestamps. Backend chosen in Phase 0/1."""
+"""Audio -> word-level timestamps via whisper.cpp (Vulkan, the only backend)."""
 
-from .backend import Word, TranscribeBackend, extract_audio, transcribe
+from .backend import Word, extract_audio, transcribe
 
-__all__ = ["Word", "TranscribeBackend", "extract_audio", "transcribe"]
+__all__ = ["Word", "extract_audio", "transcribe"]

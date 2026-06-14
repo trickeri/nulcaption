@@ -18,10 +18,8 @@ keywords = ["kdenlive", "subtitles", "ass", "karaoke", "whisper", "vulkan", "asr
 dependencies = []
 
 [project.optional-dependencies]
-# Alternative transcription backends (the default is whisper.cpp Vulkan, which
-# needs no Python deps). These are Phase 1 forced-alignment alternatives.
-whisperx = ["whisperx>=3.1"]
-faster = ["faster-whisper>=1.0"]
+# Transcription is whisper.cpp Vulkan only (no Python ASR deps) — Vulkan is the
+# portable, vendor-neutral GPU backend (NVIDIA/AMD/Intel).
 # Agent path: expose subtitle.* tools.
 mcp = ["mcp>=1.0.0"]
 dev = ["pytest>=8", "ruff>=0.5", "mypy>=1.10"]
