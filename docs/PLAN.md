@@ -3,7 +3,23 @@
 **Project:** Nuldrums / NulCaption (working name)
 **Target host:** Kdenlive (the same fork as the voice plugin), Arch Linux, RTX 4090
 **Goal:** Local-only speech-to-text with **word-by-word karaoke highlighting** — Whisper → word-level timestamps → styled ASS subtitles with per-word highlight → onto a Kdenlive subtitle track (editable) or burned-in (guaranteed render).
-**Constraints:** Local models only. Vulkan acceleration option for inference.
+**Constraints:** Local models only. **Vulkan-only** GPU inference (vendor-neutral: NVIDIA/AMD/Intel).
+
+---
+
+## ✅ Decisions locked (updated 2026-06-15)
+
+These were open in Phase 0 and are now settled — treat as fixed unless a Linux build disproves one:
+
+- **ASR backend: whisper.cpp with the Vulkan GGML backend, `large-v3` model. Vulkan ONLY** — no CUDA/whisperX/faster-whisper. Reason: anyone running the plugin gets GPU acceleration regardless of vendor; CUDA would lock out AMD/Intel users. Official whisper.cpp releases ship **no** Vulkan binary, so it is **built from source** (`-DGGML_VULKAN=ON`).
+- **Word timestamps:** `whisper-cli --max-len 1 --split-on-word` (one word per segment, with `from/to` offsets). Good enough boundaries for karaoke; revisit forced-alignment only if jitter shows.
+- **Provisioning:** the Vulkan binary + ~3 GB model are **not** in the repo. `nulcaption-setup` builds whisper.cpp and downloads the model into a cache dir (`%LOCALAPPDATA%\nulcaption` / `$NULCAPTION_HOME`). This is the model-sync mechanism.
+- **Burn-in (Path B): DONE and verified** — ffmpeg/libass burns `\kf` karaoke into a video correctly (sweep animates). This is the dependable final-render path.
+- **Target UX: an embedded GUI panel inside the forked Kdenlive (Linux).** Kdenlive has no third-party plugin API, so a CapCut-style in-app panel requires modifying the fork — Linux only. The Windows CLI works but is a dev/test path, not the product.
+
+**Proven so far (Windows, RTX 4090):** ffmpeg extract → whisper.cpp Vulkan (`gpu_device=0`) → Nuldrums karaoke ASS → ffmpeg burn-in, end-to-end via `nulcaption caption … --burn`.
+
+**Still open (verify on Arch):** does Kdenlive render `\kf` on a native subtitle track in preview + export (Path A viability)? If not, burn-in stays primary.
 
 ---
 
@@ -83,21 +99,22 @@ Recommended: support **both** — Path A for editing/iteration, Path B as the de
 
 ## Phased build
 
-- **Phase 0 — Research** (above). Gate: ASS-karaoke rendering decision + backend choice.
-- **Phase 1 — Transcription pipeline.** ffmpeg audio extract → chosen Whisper backend → normalized `[{word,start,end}]`. Acceptance: word boundaries visually correct against waveform on a test clip; Vulkan vs. CUDA path benchmarked on the 4090.
-- **Phase 2 — ASS karaoke generator.** Word timing → styled ASS with both sweep and pop presets. Acceptance: generated `.ass` plays correct karaoke timing in a known-good libass player (mpv) before touching Kdenlive.
-- **Phase 3 — Kdenlive integration.** Path A and/or Path B per Phase 0. Acceptance: subtitles appear with correct per-word highlight in Kdenlive preview (A) and/or export (B).
-- **Phase 4 — MCP + voice trigger.** Fold tools into the shared MCP server (`subtitle.transcribe`, `subtitle.generate_karaoke`, `subtitle.apply`). Enable invocation from the voice plugin ("caption this clip") and from the agent path.
-- **Phase 5 — Polish.** Style preset library (Nuldrums + plain), multi-line/positioning, max-chars-per-line tuning, batch over multiple clips, LUFS-independent (audio-only) so it slots into the Shorts pipeline.
+- **Phase 0 — Research** (above). Gate: ASS-karaoke rendering decision + backend choice. **→ backend decided (Vulkan-only whisper.cpp large-v3); native-track `\kf` rendering still to verify on Arch.**
+- **Phase 1 — Transcription pipeline. ✅ DONE (Windows, RTX 4090).** ffmpeg audio extract → whisper.cpp Vulkan → normalized `[{word,start,end}]`. `nulcaption.transcribe` + `nulcaption.setup`. Re-verify on Arch.
+- **Phase 2 — ASS karaoke generator. ✅ DONE (sweep).** Word timing → styled ASS, Nuldrums + plain presets, line grouping (`nulcaption.ass`). Sweep verified burned-in via libass. **`pop` preset still TODO** (single-word highlight needs per-word `\t` colour transforms).
+- **Phase 3 — Kdenlive integration.** Path B (burn-in) ✅ done. **Path A (native subtitle track) is the Linux work:** import `.ass` over the fork's D-Bus subtitle method; gated on the native-`\kf` test. Acceptance: per-word highlight in Kdenlive preview (A) and/or export (B).
+- **Phase 4 — Embedded GUI panel (Linux, the product UX).** A Kdenlive dock/menu action — "Auto Karaoke Captions" — with: source picker (active clip / timeline / file), style dropdown (Nuldrums/plain), preset (sweep/pop), language, and an Apply button that runs the pipeline and drops captions on a subtitle track (Path A) or burns in (Path B). Lives in the fork's Qt UI; talks to the Python pipeline via the shared bridge/MCP. Acceptance: caption a clip end-to-end without leaving Kdenlive.
+- **Phase 5 — MCP + voice trigger.** Fold tools into the shared MCP server (`subtitle.transcribe`, `subtitle.generate_karaoke`, `subtitle.apply`). Invocation from the voice plugin ("caption this clip") and the agent path.
+- **Phase 6 — Polish.** Expand style preset library, multi-line/positioning, max-chars-per-line tuning, batch over multiple clips, audio-only so it slots into the Shorts pipeline.
 
 ---
 
 ## Risks
 
-- **Kdenlive may not render karaoke tags natively** — mitigated by the burn-in fallback (Path B). Resolve in Phase 0, not late.
-- **Word-boundary jitter** — choose the backend on boundary quality (whisperX forced alignment is the safe default); bad boundaries are the #1 thing that makes karaoke look amateur.
-- **ASS import normalization** stripping tags — detect in Phase 0; if present, make burn-in primary.
-- **Vulkan backend immaturity** vs. CUDA — benchmark both; Vulkan is the portability win, CUDA the speed win on this hardware.
+- **Kdenlive may not render karaoke tags natively** — mitigated by the burn-in fallback (Path B, already working). Resolve the native-track test early on Arch, not late.
+- **Word-boundary jitter** — using whisper.cpp `--max-len 1 --split-on-word`; if boundaries look loose, add forced alignment as a post-pass (kept within the Vulkan/whisper.cpp constraint where possible). Bad boundaries are the #1 thing that makes karaoke look amateur.
+- **ASS import normalization** stripping tags — detect when testing Path A; if present, make burn-in primary.
+- **Vulkan build friction** — official whisper.cpp has no prebuilt Vulkan binary, so `nulcaption-setup` builds it (needs Vulkan SDK + a C++ toolchain + CMake). Verified building on Windows/MSVC; replicate on Arch (Vulkan SDK + gcc/clang).
 
 ---
 

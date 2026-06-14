@@ -44,11 +44,16 @@ Part of the Nuldrums Kdenlive toolchain:
 
 Default styling is the Nuldrums brand (obsidian/amethyst, highlight = amethyst).
 
-## Platforms
+## Platforms & UX
 
-Runs on **Windows and Linux (Arch / RTX 4090)**. The captioning pipeline
-(transcribe → ASS karaoke → burn-in) works standalone today; the native
-Kdenlive subtitle-track path (Path A) needs the Linux fork and is Phase 3.
+The **product UX is an embedded "Auto Karaoke Captions" panel inside the forked
+Kdenlive — Linux only** (Kdenlive has no third-party plugin API, so the panel
+lives in the fork's Qt source; built/run on Arch). See the fork's
+[`NULDRUMS_FORK.md`](https://github.com/trickeri/kdenlive/blob/nuldrums/NULDRUMS_FORK.md).
+
+The captioning **pipeline** (transcribe → ASS karaoke → burn-in) is plain Python
++ whisper.cpp + ffmpeg and **also runs on Windows as a CLI** — handy for dev/test,
+but the in-app GUI is the Linux target.
 
 ## Backend: whisper.cpp + Vulkan + large-v3
 
