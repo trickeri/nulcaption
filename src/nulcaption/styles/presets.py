@@ -18,6 +18,19 @@ def ass_colour(rgb: str, alpha: int = 0) -> str:
     return f"&H{alpha:02X}{bb}{gg}{rr}".upper()
 
 
+def ass_override_colour(rgb: str) -> str:
+    """``"6E2C8B"`` (RRGGBB) -> ``"&H8B2C6E&"`` for inline ``\\1c``/``\\c`` blocks.
+
+    The override form is ``&HBBGGRR&`` (no alpha byte, trailing ``&``) — distinct
+    from the ``&HAABBGGRR`` form used in ``[V4+ Styles]`` lines.
+    """
+    rgb = rgb.lstrip("#")
+    if len(rgb) != 6:
+        raise ValueError(f"expected RRGGBB hex, got {rgb!r}")
+    rr, gg, bb = rgb[0:2], rgb[2:4], rgb[4:6]
+    return f"&H{bb}{gg}{rr}&".upper()
+
+
 @dataclass(frozen=True, slots=True)
 class Style:
     name: str
@@ -53,14 +66,26 @@ class Style:
         )
 
 
-# Nuldrums brand: amethyst highlight on near-white base, obsidian outline.
+# Nuldrums brand: Pirata One, cyan highlight on near-white base, 4px black outline.
 NULDRUMS = Style(
     name="Nuldrums",
-    fontname="IBM Plex Sans",
+    fontname="Pirata One",
     fontsize=72,
-    highlight_rgb="B57EDC",   # amethyst
+    highlight_rgb="00FFFF",   # cyan
     base_rgb="F2F2F2",
-    outline_rgb="0B0B10",     # obsidian
+    outline_rgb="000000",     # black
+    outline=4.0,
+)
+
+# Trikeri: Oswald (Google font), same cyan highlight + 4px black outline.
+TRIKERI = Style(
+    name="Trikeri",
+    fontname="Oswald",
+    fontsize=72,
+    highlight_rgb="00FFFF",   # cyan
+    base_rgb="F2F2F2",
+    outline_rgb="000000",     # black
+    outline=4.0,
 )
 
 PLAIN = Style(
@@ -72,4 +97,4 @@ PLAIN = Style(
     outline_rgb="000000",
 )
 
-PRESETS: dict[str, Style] = {"nuldrums": NULDRUMS, "plain": PLAIN}
+PRESETS: dict[str, Style] = {"nuldrums": NULDRUMS, "trikeri": TRIKERI, "plain": PLAIN}

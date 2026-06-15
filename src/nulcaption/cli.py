@@ -1,10 +1,19 @@
 """End-to-end NulCaption CLI: media -> word timings -> karaoke ASS [-> burn-in].
 
+Designed to be driven non-interactively (e.g. by an agent or the Kdenlive fork's
+"Generate Captions" action). Stable contract: it reads any ffmpeg media, writes a
+karaoke ``.ass``, and returns 0 on success / 1 no speech / 2 bad input / 3 backend
+not provisioned. The fork passes ``--ass <tmp> --native`` and imports the result.
+
 Examples
 --------
 Generate an editable ``.ass`` next to the input::
 
     nulcaption caption clip.mp4
+
+Kdenlive-native track ASS at a chosen path (what the fork action runs)::
+
+    nulcaption caption clip.mp4 --native --ass /tmp/clip.karaoke.ass
 
 Burn the karaoke into a new video (Path B)::
 
@@ -29,8 +38,12 @@ def _caption(args: argparse.Namespace) -> int:
         return 2
 
     style = PRESETS[args.style]
-    print(f"[1/3] transcribing {src.name} (whisper.cpp Vulkan, large-v3)...")
-    words = transcribe(src, language=args.language)
+    print(f"[1/3] transcribing {src.name} (whisper.cpp Vulkan, large-v3-turbo)...")
+    try:
+        words = transcribe(src, language=args.language)
+    except RuntimeError as e:  # backend not provisioned (run nulcaption-setup)
+        print(f"error: {e}", file=sys.stderr)
+        return 3
     print(f"      {len(words)} words")
     if not words:
         print("error: no speech recognised", file=sys.stderr)
@@ -39,7 +52,10 @@ def _caption(args: argparse.Namespace) -> int:
     ass_path = Path(args.ass) if args.ass else src.with_suffix(".ass")
     print(f"[2/3] generating {args.preset} karaoke ASS ({style.name} style)...")
     ass_path.write_text(
-        generate_ass(words, style=style, preset=args.preset), encoding="utf-8"
+        generate_ass(
+            words, style=style, preset=args.preset, kdenlive_extradata=args.native
+        ),
+        encoding="utf-8",
     )
     print(f"      wrote {ass_path}")
 
@@ -48,8 +64,12 @@ def _caption(args: argparse.Namespace) -> int:
         print(f"[3/3] burning in -> {out.name} ...")
         burn_in(src, ass_path, out)
         print(f"      wrote {out}")
+    elif args.native:
+        print("[3/3] Path A: import-ready for a Kdenlive subtitle track")
+        print(f"      Subtitles -> Import Subtitle File: {ass_path}")
     else:
-        print("[3/3] skipped burn-in (pass --burn to render a video)")
+        print("[3/3] skipped burn-in (pass --burn to render a video, "
+              "--native for a Kdenlive subtitle track)")
     return 0
 
 
@@ -65,6 +85,8 @@ def main(argv: list[str] | None = None) -> int:
     cap.add_argument("--preset", choices=["sweep", "pop"], default="sweep")
     cap.add_argument("--language", default="auto")
     cap.add_argument("--burn", action="store_true", help="burn karaoke into a video")
+    cap.add_argument("--native", action="store_true",
+                     help="emit a Kdenlive-native .ass for a subtitle track (Path A)")
     cap.set_defaults(func=_caption)
 
     args = ap.parse_args(argv)

@@ -87,7 +87,7 @@ def transcribe(
         if threads:
             cmd += ["--threads", str(threads)]
 
-        subprocess.run(cmd, check=True)
+        subprocess.run(cmd, check=True, env=rt.whisper_env())
         data = json.loads((out_base.with_suffix(".json")).read_text(encoding="utf-8"))
 
     return _parse_whisper_json(data)

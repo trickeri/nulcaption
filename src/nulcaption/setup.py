@@ -75,8 +75,19 @@ def build_whisper(force: bool = False) -> Path:
             f"build finished but {rt.WHISPER_EXE} not found under {build}/bin"
         )
     rt.bin_dir().mkdir(parents=True, exist_ok=True)
+    # Co-locate the exe with its runtime libraries in bin_dir so it runs without
+    # the build tree. whisper.cpp builds the backends as shared libs (Windows:
+    # DLLs next to the exe; Linux/macOS: .so/.dylib scattered under the build
+    # tree). GGML_BACKEND_DL is OFF, so these are ordinary linked deps that the
+    # loader resolves from bin_dir (see runtime._whisper_env / LD_LIBRARY_PATH).
     staged = 0
-    for f in list(out.glob("*.dll")) + [out / rt.WHISPER_EXE]:
+    shutil.copy2(out / rt.WHISPER_EXE, rt.bin_dir() / rt.WHISPER_EXE)
+    staged += 1
+    if os.name == "nt":
+        libs = list(out.glob("*.dll"))
+    else:
+        libs = list(build.rglob("*.so")) + list(build.rglob("*.dylib"))
+    for f in libs:
         if f.is_file():
             shutil.copy2(f, rt.bin_dir() / f.name)
             staged += 1

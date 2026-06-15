@@ -35,14 +35,17 @@ Part of the Nuldrums Kdenlive toolchain:
    B) burn-in via MLT/libass (guaranteed)  ← fallback / final-render path
 ```
 
-## Two karaoke looks (presets)
+## Two karaoke looks (presets) — both implemented
 
-- **Sweep fill (classic):** `{\kf<cs>}word` — the active word wipes over its
-  duration using the style's primary vs. secondary colour.
-- **Word pop (per-word colour switch):** the spoken word uses a highlight
-  colour; crisper for short-form/Shorts captions.
+- **`sweep` (classic):** `{\kf<cs>}word` — the active word wipes over its
+  duration using the style's primary vs. secondary colour. One ASS event per line.
+- **`pop` (per-word highlight):** one ASS event per *word window* — the whole
+  line stays on screen and only the spoken word switches to the highlight colour,
+  so the highlight tracks the audio word by word; crisper for short-form captions.
 
-Default styling is the Nuldrums brand (obsidian/amethyst, highlight = amethyst).
+Both are libass-native (so they animate identically in Kdenlive's preview/export
+and in burn-in). Default styling is the Nuldrums brand (obsidian/amethyst,
+highlight = amethyst).
 
 ## Platforms & UX
 
@@ -55,21 +58,31 @@ The captioning **pipeline** (transcribe → ASS karaoke → burn-in) is plain Py
 + whisper.cpp + ffmpeg and **also runs on Windows as a CLI** — handy for dev/test,
 but the in-app GUI is the Linux target.
 
-## Backend: whisper.cpp + Vulkan + large-v3
+## Backend: whisper.cpp + Vulkan + large-v3-turbo
 
 Transcription uses **whisper.cpp built with the Vulkan GGML backend** and the
-**large-v3** model. Neither the binary nor the ~3 GB model lives in this repo —
-a one-time setup step provisions them into a cache dir
+**large-v3-turbo** model (the "large turbo": distilled 4-layer decoder, ~8×
+faster than large-v3 at near-equal accuracy — the right trade for word-timestamped
+karaoke). Neither the binary nor the ~1.6 GB model lives in this repo — a one-time
+setup step provisions them into a cache dir
 (`%LOCALAPPDATA%\nulcaption` on Windows, override with `NULCAPTION_HOME`):
 
 ```bash
-nulcaption-setup            # builds whisper.cpp (Vulkan) + downloads large-v3
+nulcaption-setup            # builds whisper.cpp (Vulkan) + downloads large-v3-turbo
 ```
 
-Requirements for the build: CMake, a C++ toolchain (MSVC/clang/gcc), the
-**Vulkan SDK** (headers + `glslc`), `git`, and `ffmpeg` on PATH. Official
-whisper.cpp releases ship no Vulkan binary, so setup builds it from the pinned
-tag. Re-run anytime; it's idempotent (`--force-build` / `--force-model` to redo).
+Requirements for the build: CMake, a C++ toolchain (MSVC/clang/gcc), the Vulkan
+headers + loader, the shader compiler `glslc`, **SPIRV-Headers** (whisper.cpp's
+Vulkan backend includes `spirv/unified1/spirv.hpp`), plus `git` and `ffmpeg` on
+PATH. On Arch:
+
+```bash
+sudo pacman -S --needed cmake gcc git ffmpeg vulkan-headers vulkan-icd-loader shaderc spirv-headers
+```
+
+Official whisper.cpp releases ship no Vulkan binary, so setup builds it from the
+pinned tag and stages the binary + its shared libs into the cache dir. Re-run
+anytime; it's idempotent (`--force-build` / `--force-model` to redo).
 
 ## Quick start
 
@@ -77,12 +90,19 @@ tag. Re-run anytime; it's idempotent (`--force-build` / `--force-model` to redo)
 pip install -e ".[dev]"     # or just run modules with PYTHONPATH=src
 nulcaption-setup            # provision the Vulkan backend + model (first run only)
 
-# transcribe + generate an editable karaoke .ass next to the clip:
+# transcribe + generate an editable karaoke .ass next to the clip (sweep look):
 nulcaption caption clip.mp4
+
+# CapCut-style per-word pop, as a Kdenlive-native subtitle track (Path A):
+nulcaption caption clip.mp4 --preset pop --native
 
 # ...or burn the karaoke straight into a video (ffmpeg/libass, Path B):
 nulcaption caption clip.mp4 --burn -o clip.karaoke.mp4 --style nuldrums
 ```
+
+`--native` emits a Kdenlive-native `.ass` (with the `[Kdenlive Extradata]`
+block) ready to load via *Subtitles → Import Subtitle File*; the karaoke tags
+and the Nuldrums style survive Kdenlive's importer unchanged.
 
 Generated `.ass` files can also be validated in a known-good libass player (mpv)
 before touching Kdenlive (PLAN Phase 2 acceptance).
