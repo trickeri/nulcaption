@@ -133,6 +133,21 @@ def fetch_model(force: bool = False) -> Path:
     return rt.model_path()
 
 
+def fetch_vad_model(force: bool = False) -> Path:
+    """Download the Silero VAD model used by whisper's built-in --vad."""
+    if rt.vad_model_ready() and not force:
+        print(f"[vad] already present: {rt.vad_model_path()}")
+        return rt.vad_model_path()
+    _download(rt.VAD_MODEL_URL, rt.vad_model_path())
+    size = rt.vad_model_path().stat().st_size
+    if size < rt.VAD_MODEL_MIN_BYTES:
+        raise RuntimeError(
+            f"downloaded VAD model is too small ({size} bytes) — likely truncated"
+        )
+    print(f"[vad] ready: {rt.vad_model_path()} ({size >> 10} KiB)")
+    return rt.vad_model_path()
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Provision the nulcaption Vulkan backend.")
     ap.add_argument("--force-build", action="store_true", help="rebuild whisper.cpp")
@@ -146,10 +161,12 @@ def main(argv: list[str] | None = None) -> int:
         build_whisper(force=args.force_build)
     if not args.skip_model:
         fetch_model(force=args.force_model)
+        fetch_vad_model(force=args.force_model)
 
     print("\nbackend ready:" if rt.is_ready() else "\nincomplete:")
     print(f"  whisper-cli: {rt.whisper_bin()}  ({'ok' if rt.whisper_ready() else 'MISSING'})")
     print(f"  model:       {rt.model_path()}  ({'ok' if rt.model_ready() else 'MISSING'})")
+    print(f"  vad model:   {rt.vad_model_path()}  ({'ok' if rt.vad_model_ready() else 'MISSING'})")
     return 0 if rt.is_ready() else 1
 
 

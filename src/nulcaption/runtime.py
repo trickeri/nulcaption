@@ -27,6 +27,17 @@ MODEL_URL = (
 # Approx size for a sanity check after download (bytes). large-v3-turbo ~1.62 GiB.
 MODEL_MIN_BYTES = 1_500_000_000
 
+# Silero VAD model for whisper.cpp's built-in Voice Activity Detection. With
+# --vad, whisper only transcribes detected speech regions, so (a) captions never
+# land on silence and (b) word timestamps anchor to real speech instead of being
+# smeared across a mostly-silent 30 s window. Small (~0.9 MiB), fetched on setup.
+VAD_MODEL_NAME = "ggml-silero-v5.1.2"
+VAD_MODEL_FILENAME = f"{VAD_MODEL_NAME}.bin"
+VAD_MODEL_URL = (
+    f"https://huggingface.co/ggml-org/whisper-vad/resolve/main/{VAD_MODEL_FILENAME}"
+)
+VAD_MODEL_MIN_BYTES = 500_000
+
 WHISPER_EXE = "whisper-cli.exe" if os.name == "nt" else "whisper-cli"
 
 
@@ -59,6 +70,10 @@ def model_path() -> Path:
     return models_dir() / MODEL_FILENAME
 
 
+def vad_model_path() -> Path:
+    return models_dir() / VAD_MODEL_FILENAME
+
+
 def whisper_env() -> dict[str, str]:
     """Environment for running ``whisper-cli`` with its co-located shared libs.
 
@@ -82,6 +97,11 @@ def whisper_ready() -> bool:
 def model_ready() -> bool:
     p = model_path()
     return p.is_file() and p.stat().st_size >= MODEL_MIN_BYTES
+
+
+def vad_model_ready() -> bool:
+    p = vad_model_path()
+    return p.is_file() and p.stat().st_size >= VAD_MODEL_MIN_BYTES
 
 
 def is_ready() -> bool:

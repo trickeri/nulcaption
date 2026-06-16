@@ -39,11 +39,18 @@ class Style:
     # highlight (swept/active) and base (un-swept) colours, RRGGBB
     highlight_rgb: str
     base_rgb: str
-    outline_rgb: str = "000000"
-    back_rgb: str = "000000"
-    bold: int = -1          # ASS: -1 true, 0 false
-    outline: float = 3.0
-    shadow: float = 1.0
+    outline_rgb: str = "000000"   # ASS OutlineColour
+    back_rgb: str = "000000"      # ASS BackColour = the drop-shadow colour
+    bold: int = -1                # ASS: -1 true, 0 false
+    italic: int = 0               # ASS: -1 true, 0 false
+    outline: float = 3.0          # outline thickness px (0 disables the outline)
+    shadow: float = 1.0           # scalar shadow depth (0 disables; see shadow_x/y)
+    # Optional explicit drop-shadow offsets. ASS's Shadow field is a single
+    # scalar (down-right diagonal); to offset X and Y independently we emit
+    # libass \xshad/\yshad override tags per event (see event_overrides()).
+    # When both are None the scalar `shadow` is used as-is.
+    shadow_x: float | None = None
+    shadow_y: float | None = None
     alignment: int = 2      # numpad: 2 = bottom-center
     margin_v: int = 60
 
@@ -52,9 +59,21 @@ class Style:
             f"Style: {self.name},{self.fontname},{self.fontsize},"
             f"{ass_colour(self.highlight_rgb)},{ass_colour(self.base_rgb)},"
             f"{ass_colour(self.outline_rgb)},{ass_colour(self.back_rgb, 0)},"
-            f"{self.bold},0,0,0,100,100,0,0,1,{self.outline},{self.shadow},"
+            f"{self.bold},{self.italic},0,0,100,100,0,0,1,{self.outline},{self.shadow},"
             f"{self.alignment},40,40,{self.margin_v},1"
         )
+
+    def event_overrides(self) -> str:
+        """libass override tags prefixed on every Dialogue event, or ``""``.
+
+        Used for things the scalar ``[V4+ Styles]`` line can't express — namely
+        independent drop-shadow X/Y offsets via ``\\xshad``/``\\yshad``.
+        """
+        if self.shadow_x is None and self.shadow_y is None:
+            return ""
+        x = self.shadow if self.shadow_x is None else self.shadow_x
+        y = self.shadow if self.shadow_y is None else self.shadow_y
+        return f"{{\\xshad{x:g}\\yshad{y:g}}}"
 
     @staticmethod
     def format_line() -> str:

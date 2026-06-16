@@ -39,6 +39,53 @@ def test_group_lines_respects_char_cap() -> None:
     assert [len(ln) for ln in lines] == [2, 1]
 
 
+def test_group_lines_breaks_after_sentence_end() -> None:
+    words = [
+        Word("That's", 0.0, 0.4), Word("insane,", 0.4, 0.9), Word("dude.", 0.9, 1.4),
+        Word("Oh,", 1.5, 1.8), Word("I", 1.8, 2.0),
+    ]
+    lines = group_lines(words)
+    # break after "dude." (sentence end), not lumped with the next sentence
+    assert [[w.text for w in ln] for ln in lines] == [
+        ["That's", "insane,", "dude."],
+        ["Oh,", "I"],
+    ]
+
+
+def test_group_lines_breaks_on_silence() -> None:
+    # a long pause (4s) splits the caption even with no punctuation
+    words = [Word("hello", 0.0, 0.4), Word("world", 4.4, 4.8)]
+    assert len(group_lines(words, max_gap=0.7)) == 2
+    # a short pause does not
+    words2 = [Word("hello", 0.0, 0.4), Word("world", 0.7, 1.1)]
+    assert len(group_lines(words2, max_gap=0.7)) == 1
+
+
+def test_pop_leaves_silence_uncaptioned() -> None:
+    # "That's insane, dude." then ~4.6s silence then "Oh, I" (the reported bug)
+    words = [
+        Word("That's", 0.0, 0.4), Word("insane,", 0.4, 0.9), Word("dude.", 0.9, 1.4),
+        Word("Oh,", 6.0, 6.3), Word("I", 6.3, 6.5),
+    ]
+    ass = generate_ass(words, preset="pop")
+
+    def _secs(ts: str) -> float:
+        h, m, s = ts.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    spans = [
+        (_secs(p[1]), _secs(p[2]))
+        for ln in ass.splitlines()
+        if ln.startswith("Dialogue:")
+        for p in [ln.split(",")]
+    ]
+    # nothing on screen at t=3.0s, deep inside the 1.4-6.0s silence
+    assert not any(start <= 3.0 <= end for start, end in spans)
+    # "dude." and "Oh," never share a caption event
+    dialogues = [ln for ln in ass.splitlines() if ln.startswith("Dialogue:")]
+    assert not any("dude." in d and "Oh," in d for d in dialogues)
+
+
 def test_generate_ass_sweep_structure() -> None:
     words = [Word("hello", 0.0, 0.8), Word("world", 0.8, 1.6)]
     ass = generate_ass(words, style=NULDRUMS, preset="sweep")

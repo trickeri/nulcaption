@@ -19,8 +19,16 @@ layer default — Path A.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
+
+# A word ends a sentence if it ends in . ! or ? (allowing trailing quotes/brackets).
+_SENTENCE_END = re.compile(r"""[.!?]["'”’)\]]*$""")
+
+
+def _ends_sentence(text: str) -> bool:
+    return bool(_SENTENCE_END.search(text.rstrip()))
 
 
 class KaraokePreset(str, Enum):
@@ -59,24 +67,41 @@ def _cs(duration_seconds: float) -> int:
 
 def group_lines(
     words: list[Word],
-    max_chars: int = 32,
+    max_chars: int = 42,
     max_words: int = 7,
+    max_gap: float = 0.7,
 ) -> list[list[Word]]:
-    """Group words into caption lines, mirroring subtitle line-break behaviour.
+    """Group words into caption lines so captions track speech, not silence.
 
-    Breaks when adding the next word would exceed ``max_chars`` or ``max_words``.
+    A line is broken:
+
+    - **after a sentence end** (a word ending in ``.``/``!``/``?``) — the next
+      sentence starts a fresh caption;
+    - **before a silence** longer than ``max_gap`` seconds — so no caption hangs
+      on screen across a pause (the gap falls *between* captions, shown by
+      neither);
+    - when it would exceed ``max_words`` or ``max_chars`` — keeping captions in
+      the readable ~4-7 word range.
+
+    Because each caption spans only its own words' timing, breaking here is what
+    keeps captions off of silent stretches.
     """
     lines: list[list[Word]] = []
     current: list[Word] = []
     char_count = 0
     for w in words:
+        if current:
+            gap = w.start - current[-1].end
+            added = len(w.text) + 1
+            if len(current) >= max_words or char_count + added > max_chars or gap > max_gap:
+                lines.append(current)
+                current, char_count = [], 0
         added = len(w.text) + (1 if current else 0)
-        if current and (len(current) >= max_words or char_count + added > max_chars):
-            lines.append(current)
-            current, char_count = [], 0
-            added = len(w.text)
         current.append(w)
         char_count += added
+        if _ends_sentence(w.text):
+            lines.append(current)
+            current, char_count = [], 0
     if current:
         lines.append(current)
     return lines
@@ -160,8 +185,9 @@ def generate_ass(
     preset: KaraokePreset | str = KaraokePreset.SWEEP,
     *,
     play_res: tuple[int, int] = (1920, 1080),
-    max_chars: int = 32,
+    max_chars: int = 42,
     max_words: int = 7,
+    max_gap: float = 0.7,
     kdenlive_extradata: bool = False,
 ) -> str:
     """Render word timings to a complete ASS document string.
@@ -198,22 +224,23 @@ def generate_ass(
         "MarginV, Effect, Text",
     ]
 
+    prefix = style.event_overrides()  # e.g. {\xshad..\yshad..}, or "" for none
     events: list[str] = []
-    for line in group_lines(words, max_chars=max_chars, max_words=max_words):
+    for line in group_lines(words, max_chars=max_chars, max_words=max_words, max_gap=max_gap):
         if not line:
             continue
         if preset is KaraokePreset.POP:
             for start_s, end_s, text in _pop_events(line, style):
                 events.append(
                     f"Dialogue: 0,{ass_timestamp(start_s)},{ass_timestamp(end_s)},"
-                    f"{style.name},,0,0,0,,{text}"
+                    f"{style.name},,0,0,0,,{prefix}{text}"
                 )
         else:
             start = ass_timestamp(line[0].start)
             end = ass_timestamp(line[-1].end)
             text = _sweep_line_text(line)
             events.append(
-                f"Dialogue: 0,{start},{end},{style.name},,0,0,0,,{text}"
+                f"Dialogue: 0,{start},{end},{style.name},,0,0,0,,{prefix}{text}"
             )
 
     return "\n".join(head + events) + "\n"
