@@ -39,6 +39,10 @@ class CaptionConfig:
     max_words: int = 7
     max_chars: int = 42
 
+    # --- position ---
+    alignment: int = 2             # ASS numpad anchor: 2=bottom-center, 5=middle, 8=top
+    margin_v: int = 60             # vertical margin (px) from the anchored edge
+
     # --- style appearance ---
     style_name: str = "Nuldrums"   # written into the ASS [V4+ Styles] line
     fontname: str = "Pirata One"
@@ -62,6 +66,8 @@ class CaptionConfig:
             name=self.style_name,
             fontname=self.fontname,
             fontsize=self.fontsize,
+            alignment=self.alignment,
+            margin_v=self.margin_v,
             highlight_rgb=self.highlight_rgb,
             base_rgb=self.base_rgb,
             outline_rgb=self.outline_rgb,

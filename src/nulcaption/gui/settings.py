@@ -13,15 +13,17 @@ from __future__ import annotations
 import sys
 
 from .. import config as cfgmod
-from ..styles import PRESETS
+from ..styles import all_presets, save_user_preset
 
 
 def _seed_from_preset(cfg: cfgmod.CaptionConfig, preset_key: str) -> None:
-    """Copy a built-in Style preset's appearance onto ``cfg`` in place."""
-    st = PRESETS[preset_key]
+    """Copy a Style preset's full appearance onto ``cfg`` in place."""
+    st = all_presets()[preset_key]
     cfg.style_name = st.name
     cfg.fontname = st.fontname
     cfg.fontsize = st.fontsize
+    cfg.alignment = st.alignment
+    cfg.margin_v = st.margin_v
     cfg.highlight_rgb = st.highlight_rgb
     cfg.base_rgb = st.base_rgb
     cfg.bold = st.bold != 0
@@ -29,6 +31,11 @@ def _seed_from_preset(cfg: cfgmod.CaptionConfig, preset_key: str) -> None:
     cfg.outline_enabled = st.outline > 0
     cfg.outline_rgb = st.outline_rgb
     cfg.outline_thickness = st.outline or cfg.outline_thickness
+    shadow_on = st.shadow > 0 or st.shadow_x is not None or st.shadow_y is not None
+    cfg.shadow_enabled = shadow_on
+    cfg.shadow_rgb = st.back_rgb
+    cfg.shadow_x = st.shadow if st.shadow_x is None else st.shadow_x
+    cfg.shadow_y = st.shadow if st.shadow_y is None else st.shadow_y
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -77,14 +84,21 @@ def main(argv: list[str] | None = None) -> int:
             self.setWindowTitle("NulCaption Settings")
             form = QtWidgets.QFormLayout(self)
 
-            # -- preset seeder --
+            # -- preset chooser: picking a preset loads it; Save writes the
+            #    current fields back to the selected preset --
             self.preset_seed = QtWidgets.QComboBox()
-            self.preset_seed.addItems([k.capitalize() for k in sorted(PRESETS)])
-            seed_btn = QtWidgets.QPushButton("Load")
-            seed_btn.clicked.connect(self._seed)
+            self._reload_presets(select=cfg.style_name)
+            # currentTextChanged fires on user picks; guard programmatic refills.
+            self.preset_seed.currentIndexChanged.connect(self._seed)
+            save_preset_btn = QtWidgets.QPushButton("Save preset")
+            save_preset_btn.clicked.connect(self._save_preset)
+            new_preset_btn = QtWidgets.QPushButton("New preset")
+            new_preset_btn.clicked.connect(self._new_preset)
             seed_row = QtWidgets.QHBoxLayout()
             seed_row.addWidget(self.preset_seed)
-            seed_row.addWidget(seed_btn)
+            seed_row.addWidget(save_preset_btn)
+            seed_row.addWidget(new_preset_btn)
+            seed_row.addStretch()
             form.addRow("Start from preset", _wrap(seed_row))
 
             form.addRow(_sep("Caption"))
@@ -115,6 +129,19 @@ def main(argv: list[str] | None = None) -> int:
             thr_row.addWidget(self.vad_default)
             thr_row.addWidget(self.vad_thr)
             form.addRow("Threshold", _wrap(thr_row))
+
+            form.addRow(_sep("Position"))
+            # Vertical anchor (ASS numpad centre column) + margin from that edge.
+            self.valign = QtWidgets.QComboBox()
+            self.valign.addItems(["Bottom", "Middle", "Top"])
+            self.valign.setCurrentIndex({2: 0, 5: 1, 8: 2}.get(cfg.alignment, 0))
+            self.margin_v = _spin(0, 2000, cfg.margin_v)
+            pos = QtWidgets.QHBoxLayout()
+            pos.addWidget(self.valign)
+            pos.addWidget(QtWidgets.QLabel("Y margin (px)"))
+            pos.addWidget(self.margin_v)
+            pos.addStretch()
+            form.addRow("Vertical", _wrap(pos))
 
             form.addRow(_sep("Appearance"))
             self.fontname = QtWidgets.QFontComboBox()
@@ -183,12 +210,37 @@ def main(argv: list[str] | None = None) -> int:
             buttons.rejected.connect(self.reject)
             form.addRow(buttons)
 
+        def _reload_presets(self, select: str | None = None) -> None:
+            """Refill the preset dropdown from disk, optionally selecting one.
+
+            Guards the change signal so refilling never triggers a reload of the
+            currently-edited fields.
+            """
+            self._loading = True
+            try:
+                self.preset_seed.clear()
+                self.preset_seed.addItems(
+                    [k.capitalize() for k in sorted(all_presets())]
+                )
+                if select:
+                    i = self.preset_seed.findText(select.capitalize())
+                    if i >= 0:
+                        self.preset_seed.setCurrentIndex(i)
+            finally:
+                self._loading = False
+
         def _seed(self) -> None:
+            if getattr(self, "_loading", False):
+                return
             key = self.preset_seed.currentText().lower()
+            if key not in all_presets():
+                return
             _seed_from_preset(cfg, key)
             self.style_name.setText(cfg.style_name)
             self.fontname.setCurrentFont(QtGui.QFont(cfg.fontname))
             self.fontsize.setValue(cfg.fontsize)
+            self.valign.setCurrentIndex({2: 0, 5: 1, 8: 2}.get(cfg.alignment, 0))
+            self.margin_v.setValue(cfg.margin_v)
             self.highlight.set_rgb(cfg.highlight_rgb)
             self.base.set_rgb(cfg.base_rgb)
             self.bold.setChecked(cfg.bold)
@@ -196,15 +248,22 @@ def main(argv: list[str] | None = None) -> int:
             self.outline_on.setChecked(cfg.outline_enabled)
             self.outline_col.set_rgb(cfg.outline_rgb)
             self.outline_thk.setValue(cfg.outline_thickness)
+            self.shadow_on.setChecked(cfg.shadow_enabled)
+            self.shadow_col.set_rgb(cfg.shadow_rgb)
+            self.shadow_x.setValue(cfg.shadow_x)
+            self.shadow_y.setValue(cfg.shadow_y)
 
-        def _save(self) -> None:
-            new = cfgmod.CaptionConfig(
+        def _form_to_config(self) -> cfgmod.CaptionConfig:
+            """Snapshot every field into a CaptionConfig (no I/O)."""
+            return cfgmod.CaptionConfig(
                 preset=self.look.currentText(),
                 language=self.language.text().strip() or "auto",
                 vad=self.vad.isChecked(),
                 vad_threshold=None if self.vad_default.isChecked() else round(self.vad_thr.value(), 3),
                 max_words=self.max_words.value(),
                 max_chars=self.max_chars.value(),
+                alignment={0: 2, 1: 5, 2: 8}[self.valign.currentIndex()],
+                margin_v=self.margin_v.value(),
                 style_name=self.style_name.text().strip() or "Nuldrums",
                 fontname=self.fontname.currentFont().family(),
                 fontsize=self.fontsize.value(),
@@ -220,7 +279,48 @@ def main(argv: list[str] | None = None) -> int:
                 shadow_x=round(self.shadow_x.value(), 2),
                 shadow_y=round(self.shadow_y.value(), 2),
             )
-            path = cfgmod.save(new)
+
+        def _save_preset(self) -> None:
+            """Write the current appearance fields back to a named preset."""
+            style = self._form_to_config().to_style()
+            key = style.name.strip().lower()
+            if not key:
+                QtWidgets.QMessageBox.warning(
+                    self, "Save preset", "Give the style a name first."
+                )
+                return
+            path = save_user_preset(key, style)
+            self._reload_presets(select=style.name)
+            QtWidgets.QMessageBox.information(
+                self, "Preset saved", f"Preset “{style.name}” saved to\n{path}"
+            )
+
+        def _new_preset(self) -> None:
+            """Create a new preset from the current fields under a prompted name."""
+            name, ok = QtWidgets.QInputDialog.getText(
+                self, "New preset", "Preset name:"
+            )
+            name = name.strip()
+            if not ok or not name:
+                return
+            key = name.lower()
+            if key in all_presets():
+                btn = QtWidgets.QMessageBox.question(
+                    self, "New preset",
+                    f"A preset “{name}” already exists. Overwrite it?",
+                )
+                if btn != QtWidgets.QMessageBox.StandardButton.Yes:
+                    return
+            self.style_name.setText(name)
+            style = self._form_to_config().to_style()
+            path = save_user_preset(key, style)
+            self._reload_presets(select=name)
+            QtWidgets.QMessageBox.information(
+                self, "Preset created", f"Preset “{name}” saved to\n{path}"
+            )
+
+        def _save(self) -> None:
+            path = cfgmod.save(self._form_to_config())
             QtWidgets.QMessageBox.information(self, "Saved", f"Settings saved to\n{path}")
             self.accept()
 

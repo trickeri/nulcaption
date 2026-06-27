@@ -1,6 +1,7 @@
 """Tests for the ASS karaoke generator, line grouping, and style rendering."""
 from __future__ import annotations
 
+from nulcaption import config as cfgmod
 from nulcaption.ass import Word, ass_timestamp, group_lines, generate_ass
 from nulcaption.ass.karaoke import KaraokePreset, _cs
 from nulcaption.styles import NULDRUMS
@@ -135,6 +136,67 @@ def test_pop_holds_highlight_until_next_word_over_a_gap() -> None:
     ass = generate_ass(words, preset="pop", max_words=99)
     first = next(ln for ln in ass.splitlines() if ln.startswith("Dialogue:"))
     assert "0:00:00.00,0:00:00.90" in first  # ends where word "b" begins
+
+
+def test_pop_line_does_not_linger_into_next() -> None:
+    # max_words break mid-sentence; whisper over-stretched the last word "c" of
+    # line 1 (end 3.0) well past line 2's first word "d" (start 1.5). The last
+    # pop event of line 1 must be capped at 1.5 so the two lines never overlap.
+    words = [
+        Word("a", 0.0, 0.5), Word("b", 0.5, 1.0), Word("c", 1.0, 3.0),
+        Word("d", 1.5, 2.0), Word("e", 2.0, 2.5),
+    ]
+    ass = generate_ass(words, preset="pop", max_words=3, max_chars=999)
+
+    def _secs(ts: str) -> float:
+        h, m, s = ts.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    dialogues = [ln for ln in ass.splitlines() if ln.startswith("Dialogue:")]
+    # line-1 events show "a b c"; line-2 events show "d e". No line-1 event may
+    # end after line 2's first word (t=1.5), or the old line lingers on screen.
+    line1 = [d for d in dialogues if "}a" in d and "}d" not in d]
+    assert line1  # sanity: we actually found line-1 events
+    assert all(_secs(d.split(",")[2]) <= 1.5 + 1e-9 for d in line1)
+
+
+def test_sweep_line_capped_at_next_line_start() -> None:
+    words = [
+        Word("a", 0.0, 0.5), Word("b", 0.5, 1.0), Word("c", 1.0, 3.0),
+        Word("d", 1.5, 2.0),
+    ]
+    ass = generate_ass(words, preset="sweep", max_words=3, max_chars=999)
+    first = next(ln for ln in ass.splitlines() if ln.startswith("Dialogue:"))
+    # line 1 ends at 1.5 (line 2's start), not at c's stretched end of 3.0
+    assert first.split(",")[2] == "0:00:01.50"
+
+
+def test_middle_alignment_positions_with_margin() -> None:
+    # libass ignores MarginV for middle alignment, so we emit an explicit \pos
+    # whose y drops as the Y margin grows (margin raises the caption).
+    import re
+
+    def _pos_y(margin: int) -> int:
+        st = cfgmod.CaptionConfig(alignment=5, margin_v=margin).to_style()
+        ass = generate_ass([Word("hi", 0, 1)], style=st, play_res=(1920, 1080))
+        d = next(ln for ln in ass.splitlines() if ln.startswith("Dialogue:"))
+        m = re.search(r"\\pos\((\d+),(\d+)\)", d)
+        assert m, d
+        return int(m.group(2))
+
+    assert _pos_y(0) == 540          # dead centre of a 1080 frame
+    assert _pos_y(150) == 390        # 150px above centre
+    assert _pos_y(150) < _pos_y(0)   # bigger margin -> higher up
+
+
+def test_bottom_alignment_uses_marginv_not_pos() -> None:
+    # top/bottom alignments rely on the style MarginV (which libass honours) and
+    # must NOT carry a \pos override.
+    for align in (2, 8):
+        st = cfgmod.CaptionConfig(alignment=align, margin_v=120).to_style()
+        ass = generate_ass([Word("hi", 0, 1)], style=st)
+        assert "\\pos(" not in ass
+        assert ",120,1" in ass  # MarginV lands in the style line
 
 
 def test_kdenlive_extradata_block_opt_in() -> None:

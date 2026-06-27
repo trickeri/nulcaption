@@ -6,7 +6,10 @@ In karaoke, un-swept text shows ``SecondaryColour`` and the sweep fills to
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+import json
+import os
+from dataclasses import asdict, dataclass, fields as _dc_fields
+from pathlib import Path
 
 
 def ass_colour(rgb: str, alpha: int = 0) -> str:
@@ -116,4 +119,72 @@ PLAIN = Style(
     outline_rgb="000000",
 )
 
-PRESETS: dict[str, Style] = {"nuldrums": NULDRUMS, "trikeri": TRIKERI, "plain": PLAIN}
+# Built-in, code-shipped presets. User edits are layered on top (see below) and
+# never mutate these, so a built-in can always be recovered by deleting its
+# override from the user presets file.
+BUILTIN_PRESETS: dict[str, Style] = {"nuldrums": NULDRUMS, "trikeri": TRIKERI, "plain": PLAIN}
+
+# Backwards-compatible alias. Prefer ``all_presets()`` so user-saved presets and
+# edits to the built-ins are picked up.
+PRESETS = BUILTIN_PRESETS
+
+
+def presets_path() -> Path:
+    """Where user-saved/edited presets live (override with ``$NULCAPTION_PRESETS``)."""
+    env = os.environ.get("NULCAPTION_PRESETS")
+    if env:
+        return Path(env)
+    base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
+    return Path(base) / "nulcaption" / "presets.json"
+
+
+def _style_from_dict(d: dict) -> Style:
+    known = {f.name for f in _dc_fields(Style)}
+    return Style(**{k: v for k, v in d.items() if k in known})
+
+
+def load_user_presets(path: Path | None = None) -> dict[str, Style]:
+    """User-saved presets keyed by lowercase name; ``{}`` if none/invalid."""
+    p = path or presets_path()
+    if not p.is_file():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: dict[str, Style] = {}
+    for k, v in data.items():
+        if isinstance(v, dict):
+            try:
+                out[str(k)] = _style_from_dict(v)
+            except TypeError:
+                continue
+    return out
+
+
+def all_presets(path: Path | None = None) -> dict[str, Style]:
+    """Built-in presets with the user's saved presets/edits layered on top."""
+    merged = dict(BUILTIN_PRESETS)
+    merged.update(load_user_presets(path))
+    return merged
+
+
+def save_user_preset(key: str, style: Style, path: Path | None = None) -> Path:
+    """Persist ``style`` under ``key`` in the user presets file; returns the path."""
+    p = path or presets_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    existing: dict = {}
+    if p.is_file():
+        try:
+            loaded = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                existing = loaded
+        except (json.JSONDecodeError, OSError):
+            existing = {}
+    existing[key] = asdict(style)
+    tmp = p.with_suffix(p.suffix + ".part")
+    tmp.write_text(json.dumps(existing, indent=2) + "\n", encoding="utf-8")
+    tmp.replace(p)
+    return p

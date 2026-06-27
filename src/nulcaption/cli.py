@@ -28,7 +28,7 @@ from pathlib import Path
 from . import config as cfgmod
 from .ass import generate_ass
 from .integration import burn_in
-from .styles import PRESETS
+from .styles import all_presets
 from .transcribe import transcribe
 
 
@@ -40,7 +40,7 @@ def _caption(args: argparse.Namespace) -> int:
 
     # A named --style preset overrides the saved config; otherwise the config's
     # resolved appearance (what the settings window writes) is used.
-    style = PRESETS[args.style] if args.style else args.config.to_style()
+    style = all_presets()[args.style] if args.style else args.config.to_style()
     print(f"[1/3] transcribing {src.name} (whisper.cpp Vulkan, large-v3-turbo)...")
     try:
         words = transcribe(
@@ -82,19 +82,38 @@ def _caption(args: argparse.Namespace) -> int:
     return 0
 
 
+def _restyle(args: argparse.Namespace) -> int:
+    from .ass.restyle import restyle_ass_text
+
+    src = Path(args.input)
+    if not src.is_file():
+        print(f"error: no such file: {src}", file=sys.stderr)
+        return 2
+    style = all_presets()[args.style] if args.style else args.config.to_style()
+    try:
+        text = src.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"error: cannot read {src}: {exc}", file=sys.stderr)
+        return 2
+    out = Path(args.out) if args.out else src
+    out.write_text(restyle_ass_text(text, style), encoding="utf-8")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(prog="nulcaption", description=__doc__)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
     # Saved settings (settings window) become the defaults; explicit flags win.
     cfg = cfgmod.load()
+    preset_names = sorted(all_presets())
 
     cap = sub.add_parser("caption", help="caption a media file")
     cap.add_argument("input", help="input media (any ffmpeg-readable file)")
     cap.add_argument("-o", "--output", help="output video path (with --burn)")
     cap.add_argument("--ass", help="output .ass path (default: alongside input)")
-    cap.add_argument("--style", choices=sorted(PRESETS), default=None,
-                     help="use a named built-in style preset instead of the "
+    cap.add_argument("--style", choices=preset_names, default=None,
+                     help="use a named style preset instead of the "
                           "saved appearance settings")
     cap.add_argument("--preset", choices=["sweep", "pop"], default=cfg.preset)
     cap.add_argument("--language", default=cfg.language)
@@ -111,6 +130,14 @@ def main(argv: list[str] | None = None) -> int:
     cap.add_argument("--native", action="store_true",
                      help="emit a Kdenlive-native .ass for a subtitle track (Path A)")
     cap.set_defaults(func=_caption, config=cfg)
+
+    res = sub.add_parser("restyle",
+                         help="restyle/reposition an existing .ass in place (no transcription)")
+    res.add_argument("input", help="existing karaoke .ass file")
+    res.add_argument("--out", help="output path (default: overwrite the input)")
+    res.add_argument("--style", choices=preset_names, default=None,
+                     help="use a named preset instead of the saved settings")
+    res.set_defaults(func=_restyle, config=cfg)
 
     args = ap.parse_args(argv)
     return args.func(args)

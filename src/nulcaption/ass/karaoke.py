@@ -146,17 +146,24 @@ def _pop_event_text(line: list[Word], active: int, style) -> str:
     return "".join(parts)
 
 
-def _pop_events(line: list[Word], style) -> list[tuple[float, float, str]]:
+def _pop_events(
+    line: list[Word], style, next_start: float | None = None
+) -> list[tuple[float, float, str]]:
     """One ``(start, end, text)`` per word: the whole line shown, one word lit.
 
     A word's highlight holds until the next word starts (so silences between
-    words don't drop the caption), and the last word holds to its own end.
+    words don't drop the caption), and the last word holds to its own end —
+    but never past ``next_start`` (the next line's first word). Whisper stretches
+    a pre-pause word's end up to ``MAX_WORD_DUR``, so without this cap the last
+    word of a line would linger on screen well into the following caption.
     """
     out: list[tuple[float, float, str]] = []
     n = len(line)
     for j in range(n):
         start = line[j].start
         end = line[j + 1].start if j < n - 1 else line[j].end
+        if next_start is not None:
+            end = min(end, next_start)
         if end <= start:
             end = start + 0.04  # ~1 frame floor; ASS/libass need end > start
         out.append((start, end, _pop_event_text(line, j, style)))
@@ -224,20 +231,34 @@ def generate_ass(
         "MarginV, Effect, Text",
     ]
 
-    prefix = style.event_overrides()  # e.g. {\xshad..\yshad..}, or "" for none
+    # libass ignores MarginV for middle alignment (4/5/6) — it always dead-centres
+    # the text — so the GUI's Y margin would do nothing there. Position the line
+    # explicitly with \pos instead: the margin offsets it above the frame centre
+    # (positive = higher). Top/bottom keep using the style's MarginV, which works.
+    mid_pos = ""
+    if style.alignment in (4, 5, 6):
+        cy = height // 2 - style.margin_v
+        mid_pos = f"{{\\an{style.alignment}\\pos({width // 2},{cy})}}"
+
+    prefix = mid_pos + style.event_overrides()  # \pos + {\xshad..\yshad..}, or ""
     events: list[str] = []
-    for line in group_lines(words, max_chars=max_chars, max_words=max_words, max_gap=max_gap):
-        if not line:
-            continue
+    grouped = [ln for ln in group_lines(
+        words, max_chars=max_chars, max_words=max_words, max_gap=max_gap) if ln]
+    for idx, line in enumerate(grouped):
+        # Cap a line's on-screen time at the next line's first word so a finished
+        # caption never lingers into the next one (whisper over-stretches the last
+        # word's end across a pause — see _pop_events / MAX_WORD_DUR).
+        next_start = grouped[idx + 1][0].start if idx + 1 < len(grouped) else None
         if preset is KaraokePreset.POP:
-            for start_s, end_s, text in _pop_events(line, style):
+            for start_s, end_s, text in _pop_events(line, style, next_start):
                 events.append(
                     f"Dialogue: 0,{ass_timestamp(start_s)},{ass_timestamp(end_s)},"
                     f"{style.name},,0,0,0,,{prefix}{text}"
                 )
         else:
+            end_s = line[-1].end if next_start is None else min(line[-1].end, next_start)
             start = ass_timestamp(line[0].start)
-            end = ass_timestamp(line[-1].end)
+            end = ass_timestamp(end_s)
             text = _sweep_line_text(line)
             events.append(
                 f"Dialogue: 0,{start},{end},{style.name},,0,0,0,,{prefix}{text}"

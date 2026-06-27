@@ -4,6 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from nulcaption import config as cfgmod
+from nulcaption import styles
 from nulcaption.ass.karaoke import KaraokePreset, generate_ass
 from nulcaption.transcribe.backend import MAX_WORD_DUR, _parse_whisper_json
 
@@ -51,6 +52,31 @@ def test_shadow_override_prefixes_events() -> None:
     st = cfgmod.CaptionConfig(shadow_enabled=True, shadow_x=2, shadow_y=2).to_style()
     out = generate_ass(words, style=st, preset=KaraokePreset.POP)
     assert r"{\xshad2\yshad2}" in out
+
+
+def test_user_preset_save_and_merge(tmp_path: Path) -> None:
+    p = tmp_path / "presets.json"
+    # built-ins available before any user file exists
+    assert styles.all_presets(p).keys() >= styles.BUILTIN_PRESETS.keys()
+    # editing a built-in's appearance and saving overrides it in all_presets()
+    edited = cfgmod.CaptionConfig(style_name="Trikeri", fontsize=123).to_style()
+    styles.save_user_preset("trikeri", edited, p)
+    assert styles.all_presets(p)["trikeri"].fontsize == 123
+    # built-in dict itself is untouched (recoverable)
+    assert styles.BUILTIN_PRESETS["trikeri"].fontsize == 72
+    # a freshly-named preset is added, not collided
+    new = cfgmod.CaptionConfig(style_name="Sunset", fontsize=80).to_style()
+    styles.save_user_preset("sunset", new, p)
+    merged = styles.all_presets(p)
+    assert merged["sunset"].name == "Sunset"
+    assert set(merged) >= {"nuldrums", "plain", "trikeri", "sunset"}
+
+
+def test_user_presets_ignores_garbage(tmp_path: Path) -> None:
+    p = tmp_path / "presets.json"
+    p.write_text("not json")
+    assert styles.load_user_presets(p) == {}
+    assert styles.all_presets(p).keys() == styles.BUILTIN_PRESETS.keys()
 
 
 def test_word_end_clamped_to_max_dur() -> None:
