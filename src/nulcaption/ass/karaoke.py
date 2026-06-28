@@ -146,27 +146,63 @@ def _pop_event_text(line: list[Word], active: int, style) -> str:
     return "".join(parts)
 
 
+# A finished caption holds at most this long past the last word's start before it
+# clears — keeps the line from sitting on screen across trailing silence. Whisper
+# stretches a pre-pause word's end up to MAX_WORD_DUR (2s), which is what put a
+# caption over the quiet; this bounds the trailing hold to a natural read-off.
+LAST_WORD_HOLD = 0.6  # seconds
+
+
 def _pop_events(
     line: list[Word], style, next_start: float | None = None
 ) -> list[tuple[float, float, str]]:
     """One ``(start, end, text)`` per word: the whole line shown, one word lit.
 
     A word's highlight holds until the next word starts (so silences between
-    words don't drop the caption), and the last word holds to its own end —
-    but never past ``next_start`` (the next line's first word). Whisper stretches
-    a pre-pause word's end up to ``MAX_WORD_DUR``, so without this cap the last
-    word of a line would linger on screen well into the following caption.
+    words don't drop the caption). The last word holds only briefly past its own
+    start (``LAST_WORD_HOLD``) and never past ``next_start`` (the next line) — so
+    the caption clears into trailing silence instead of lingering on a stretched
+    whisper end.
     """
     out: list[tuple[float, float, str]] = []
     n = len(line)
     for j in range(n):
         start = line[j].start
-        end = line[j + 1].start if j < n - 1 else line[j].end
+        if j < n - 1:
+            end = line[j + 1].start
+        else:
+            # last word: cap the trailing hold so it doesn't sit over silence
+            end = min(line[j].end, start + LAST_WORD_HOLD)
         if next_start is not None:
             end = min(end, next_start)
         if end <= start:
             end = start + 0.04  # ~1 frame floor; ASS/libass need end > start
         out.append((start, end, _pop_event_text(line, j, style)))
+    return out
+
+
+def _word_events(line: list[Word], next_start: float | None = None) -> list[tuple[float, float, str]]:
+    """One tight ``(start, end, word)`` per word for the WORD-CLIP edit model.
+
+    Text is the bare word (no \\pos/colour override tags) so each timeline clip
+    reads as just that word — positioning and the karaoke highlight are a *render
+    compile* concern, not stored here. Words abut (word j ends where j+1 starts)
+    so a compiled line highlights continuously; the last word's hold is capped so
+    the caption clears into silence (same bound as pop, ``LAST_WORD_HOLD``).
+    """
+    out: list[tuple[float, float, str]] = []
+    n = len(line)
+    for j in range(n):
+        start = line[j].start
+        if j < n - 1:
+            end = line[j + 1].start
+        else:
+            end = min(line[j].end, start + LAST_WORD_HOLD)
+        if next_start is not None:
+            end = min(end, next_start)
+        if end <= start:
+            end = start + 0.04
+        out.append((start, end, line[j].text))
     return out
 
 
@@ -196,12 +232,18 @@ def generate_ass(
     max_words: int = 7,
     max_gap: float = 0.7,
     kdenlive_extradata: bool = False,
+    word_clips: bool = False,
 ) -> str:
     """Render word timings to a complete ASS document string.
 
     ``kdenlive_extradata`` adds the ``[Kdenlive Extradata]`` block so the file
     imports onto a native Kdenlive subtitle track (Path A); leave it off for
     plain libass burn-in (Path B).
+
+    ``word_clips`` emits the **edit model** instead of a karaoke render: one
+    Dialogue event per word, text = the bare word, with the line/group id in the
+    ASS ``Name`` field (``L0``, ``L1`` …) so the fork can recompile a linked
+    group into a karaoke line. Used by the word-per-clip caption editor.
     """
     from ..styles import NULDRUMS  # local import keeps core import-light
 
@@ -249,7 +291,15 @@ def generate_ass(
         # caption never lingers into the next one (whisper over-stretches the last
         # word's end across a pause — see _pop_events / MAX_WORD_DUR).
         next_start = grouped[idx + 1][0].start if idx + 1 < len(grouped) else None
-        if preset is KaraokePreset.POP:
+        if word_clips:
+            # Edit model: one bare-word event per word, grouped by line id in Name.
+            group_id = f"L{idx}"
+            for start_s, end_s, word in _word_events(line, next_start):
+                events.append(
+                    f"Dialogue: 0,{ass_timestamp(start_s)},{ass_timestamp(end_s)},"
+                    f"{style.name},{group_id},0,0,0,,{word}"
+                )
+        elif preset is KaraokePreset.POP:
             for start_s, end_s, text in _pop_events(line, style, next_start):
                 events.append(
                     f"Dialogue: 0,{ass_timestamp(start_s)},{ass_timestamp(end_s)},"

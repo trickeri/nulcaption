@@ -171,6 +171,54 @@ def test_sweep_line_capped_at_next_line_start() -> None:
     assert first.split(",")[2] == "0:00:01.50"
 
 
+def test_word_clips_one_bare_event_per_word_grouped_by_line() -> None:
+    # Two lines (sentence break) -> one event per word, bare text, line id in Name.
+    words = [
+        Word("hello", 0.0, 0.4), Word("there.", 0.4, 0.9),
+        Word("how", 1.0, 1.3), Word("are", 1.3, 1.6), Word("you", 1.6, 2.0),
+    ]
+    ass = generate_ass(words, style=NULDRUMS, word_clips=True)
+    dialogues = [ln for ln in ass.splitlines() if ln.startswith("Dialogue:")]
+    assert len(dialogues) == 5  # one per word
+    # fields: Layer,Start,End,Style,Name,L,R,V,Effect,Text
+    rows = [d[len("Dialogue: "):].split(",", 9) for d in dialogues]
+    texts = [r[9] for r in rows]
+    names = [r[4] for r in rows]
+    assert texts == ["hello", "there.", "how", "are", "you"]  # bare words, no tags
+    assert all("\\pos" not in t and "{" not in t for t in texts)
+    assert names == ["L0", "L0", "L1", "L1", "L1"]  # grouped by line
+    # tight: within a line word j ends where j+1 starts (no overlap)
+    def _secs(ts):
+        h, m, s = ts.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+    assert abs(_secs(rows[0][2]) - _secs(rows[1][1])) < 1e-6  # hello.end == there.start
+
+
+def test_word_clips_last_word_capped_to_silence() -> None:
+    from nulcaption.ass.karaoke import LAST_WORD_HOLD
+    ass = generate_ass([Word("yo", 0.0, 2.0)], word_clips=True)
+    d = next(ln for ln in ass.splitlines() if ln.startswith("Dialogue:"))
+    end = d.split(",")[2]
+    h, m, s = end.split(":")
+    assert int(h) * 3600 + int(m) * 60 + float(s) <= LAST_WORD_HOLD + 1e-9
+
+
+def test_pop_last_word_does_not_linger_over_silence() -> None:
+    # whisper stretched the only word's end to 2.0s across the following pause;
+    # the caption must clear after ~LAST_WORD_HOLD, not sit there for 2s.
+    from nulcaption.ass.karaoke import LAST_WORD_HOLD
+    words = [Word("hey", 0.0, 2.0)]
+    ass = generate_ass(words, preset="pop")
+    d = next(ln for ln in ass.splitlines() if ln.startswith("Dialogue:"))
+    end = d.split(",")[2]
+
+    def _secs(ts):
+        h, m, s = ts.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    assert _secs(end) <= LAST_WORD_HOLD + 1e-9   # ~0.6s, not 2.0s
+
+
 def test_middle_alignment_positions_with_margin() -> None:
     # libass ignores MarginV for middle alignment, so we emit an explicit \pos
     # whose y drops as the Y margin grows (margin raises the caption).

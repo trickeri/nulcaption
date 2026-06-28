@@ -63,6 +63,7 @@ def _caption(args: argparse.Namespace) -> int:
         generate_ass(
             words, style=style, preset=args.preset, kdenlive_extradata=args.native,
             max_words=args.max_words, max_chars=args.max_chars,
+            word_clips=args.word_clips,
         ),
         encoding="utf-8",
     )
@@ -129,6 +130,10 @@ def main(argv: list[str] | None = None) -> int:
     cap.add_argument("--burn", action="store_true", help="burn karaoke into a video")
     cap.add_argument("--native", action="store_true",
                      help="emit a Kdenlive-native .ass for a subtitle track (Path A)")
+    cap.add_argument("--word-clips", action="store_true", dest="word_clips",
+                     help="emit the word-per-clip edit model (one bare-word event per "
+                          "word, line id in the ASS Name field) for the fork's caption "
+                          "editor, which compiles linked words back into a karaoke line")
     cap.set_defaults(func=_caption, config=cfg)
 
     res = sub.add_parser("restyle",
