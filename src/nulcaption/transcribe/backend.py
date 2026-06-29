@@ -21,6 +21,8 @@ from pathlib import Path
 
 from .. import runtime as rt
 from ..ass import Word
+from .service import ServiceError, transcribe_via_service
+from .service import service_url as resolve_service_url
 
 
 def extract_audio(src: str | Path, dst: str | Path) -> Path:
@@ -74,30 +76,59 @@ def transcribe(
     threads: int | None = None,
     use_vad: bool = True,
     vad_threshold: float | None = None,
+    prefer_service: bool = True,
+    service_url: str | None = None,
 ) -> list[Word]:
-    """Return normalised word timings for ``audio_path`` (whisper.cpp Vulkan).
+    """Return normalised word timings for ``audio_path``.
 
     ``audio_path`` may be any media ffmpeg can read; non-WAV inputs are extracted
     to mono 16 kHz first.
 
-    ``use_vad`` (default on) runs whisper's built-in Silero VAD so only detected
-    speech is transcribed. This is what keeps captions off silent stretches and
-    word timestamps locked to real speech — without it, whisper opens 30 s
-    windows over silence and smears (or hallucinates, e.g. "how how how") words
-    across the quiet. Falls back to no-VAD with a warning if the VAD model isn't
-    provisioned (run ``nulcaption-setup``).
+    Backend selection: when ``prefer_service`` is set (the default), the audio is
+    sent to the shared system-wide STT daemon (``whispermodel`` / whisper-server,
+    later Parakeet) if one is reachable — a model already warm in VRAM, so no
+    per-job cold load. If that service is unreachable or can't supply word
+    timestamps, we transparently fall back to the local whisper.cpp (Vulkan)
+    backend. ``service_url`` overrides the endpoint (else ``$WHISPER_HTTP_URL``
+    or the daemon default). A successful service response with no speech is
+    trusted (returns ``[]``) — only an actual service *failure* falls back.
 
-    ``vad_threshold`` (whisper default 0.5) is the speech-probability cutoff:
-    raise it (e.g. 0.6–0.7) for clips with loud background audio bleeding into a
-    mixed track so only confident speech is kept; lower it for a clean, quiet
-    mic track where speech is being missed. ``None`` leaves whisper's default.
+    ``use_vad`` (default on) only affects the **local** backend: it runs
+    whisper's built-in Silero VAD so only detected speech is transcribed. This is
+    what keeps captions off silent stretches and word timestamps locked to real
+    speech — without it, whisper opens 30 s windows over silence and smears (or
+    hallucinates, e.g. "how how how") words across the quiet. Falls back to
+    no-VAD with a warning if the VAD model isn't provisioned. (The shared service
+    runs its own VAD/engine config; a transducer backend like Parakeet does not
+    hallucinate over silence, so this knob is moot there.)
+
+    ``vad_threshold`` (whisper default 0.5) is the local-backend VAD
+    speech-probability cutoff: raise it (e.g. 0.6–0.7) for clips with loud
+    background audio bleeding into a mixed track so only confident speech is
+    kept; lower it for a clean, quiet mic track. ``None`` leaves whisper's
+    default.
     """
-    rt.require_ready()
     src = Path(audio_path)
 
     with tempfile.TemporaryDirectory(prefix="nulcaption-") as td:
         tmp = Path(td)
         wav = src if _looks_like_wav_16k_mono(src) else extract_audio(src, tmp / "audio.wav")
+
+        if prefer_service:
+            url = resolve_service_url(service_url)
+            try:
+                words = transcribe_via_service(
+                    wav, base_url=url, language=language, max_word_dur=MAX_WORD_DUR
+                )
+                print(f"[nulcaption] transcribed via shared STT service ({url})",
+                      file=sys.stderr)
+                return words
+            except ServiceError as exc:
+                print(f"[nulcaption] STT service unavailable ({exc}); "
+                      "falling back to local whisper.cpp.", file=sys.stderr)
+
+        # Local whisper.cpp (Vulkan) backend — self-contained, VAD-capable.
+        rt.require_ready()
         out_base = tmp / "out"
 
         cmd = [

@@ -39,6 +39,13 @@ class CaptionConfig:
     max_words: int = 7
     max_chars: int = 42
 
+    # --- speech-to-text backend ---
+    # Prefer the shared system-wide STT daemon (whispermodel / whisper-server,
+    # later Parakeet) when it's running, instead of cold-loading nulcaption's own
+    # whisper.cpp model per job. Falls back to the local backend if it's down.
+    use_stt_service: bool = True
+    stt_service_url: str = ""       # "" = $WHISPER_HTTP_URL or the daemon default
+
     # --- position ---
     alignment: int = 2             # ASS numpad anchor: 2=bottom-center, 5=middle, 8=top
     margin_v: int = 60             # vertical margin (px) from the anchored edge
