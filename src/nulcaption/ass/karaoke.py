@@ -227,7 +227,12 @@ def generate_ass(
     style=None,
     preset: KaraokePreset | str = KaraokePreset.SWEEP,
     *,
-    play_res: tuple[int, int] = (1920, 1080),
+    # PlayRes must match the TARGET frame's aspect or libass scales the outline/shadow
+    # anisotropically (a 1920x1080 PlayRes on a 1080x1920 vertical frame made the outline
+    # ~3x thicker top/bottom than the sides). Vertical shorts are 9:16; PlayResY stays 1080
+    # so the established font scale (frameH/PlayResY ~= 1.78x) is unchanged — only PlayResX
+    # changes to 1080*9/16 ~= 608, giving equal horizontal/vertical scale -> uniform outline.
+    play_res: tuple[int, int] = (608, 1080),
     max_chars: int = 42,
     max_words: int = 7,
     max_gap: float = 0.7,
